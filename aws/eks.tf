@@ -125,20 +125,24 @@ resource "aws_eks_addon" "kube_proxy" {
   cluster_name = aws_eks_cluster.this.name
   addon_name   = "kube-proxy"
 }
-# Give the ability to create aws load balancers as k8s services
-resource "aws_eks_addon" "aws_load_balancer_controller" {
-  cluster_name = aws_eks_cluster.this.name
-  addon_name   = "aws-load-balancer-controller"
-}
 
 # EKS cluster
 resource "aws_eks_cluster" "this" {
   name     = "eks-cluster"
+  version  = "1.32"
   role_arn = aws_iam_role.eks_cluster.arn
 
   vpc_config {
+    endpoint_private_access = false
+    endpoint_public_access = true
+
     subnet_ids         = [aws_subnet.private.id, aws_subnet.public.id]
     security_group_ids = [aws_security_group.eks_cluster.id]
+  }
+
+  access_config {
+    authentication_mode = "API"
+    bootstrap_cluster_creator_admin_permissions = true
   }
 
   enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
@@ -152,16 +156,18 @@ resource "aws_eks_cluster" "this" {
 # Node groups
 resource "aws_eks_node_group" "php_nodes" {
   cluster_name    = aws_eks_cluster.this.name
+  version = aws_eks_cluster.this.version
   node_group_name = "backend-nodes"
   node_role_arn   = aws_iam_role.eks_node.arn
   subnet_ids      = [aws_subnet.private.id]
 
   scaling_config {
     desired_size = 1
-    max_size     = 1
+    max_size     = 2
     min_size     = 1
   }
 
+  capacity_type = "ON_DEMAND"
   instance_types = ["t3.large"]
 
   labels = {
@@ -177,6 +183,10 @@ resource "aws_eks_node_group" "php_nodes" {
     aws_iam_role_policy_attachment.eks_vpc_resource_controller,
     aws_iam_role_policy_attachment.ecr_read_policy
   ]
+
+  lifecycle {
+    ignore_changes = [ scaling_config[0].desired_size ]
+  }
 }
 
 # Configure local kubectl
